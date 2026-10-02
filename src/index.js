@@ -389,6 +389,59 @@ function readBody(request) {
  *   log?: (line: string) => void,
  * }} options
  */
+/** A PostedMessage as the control API takes it. */
+function postedMessageBody(message) {
+  return typeof message === "string"
+    ? { text: message }
+    : {
+        ...(message.text !== undefined ? { text: message.text } : {}),
+        ...(message.photo
+          ? {
+              photo_base64: Buffer.from(message.photo).toString("base64"),
+            }
+          : {}),
+        ...(message.media
+          ? {
+              media: {
+                type: message.media.type,
+                base64: Buffer.from(message.media.bytes ?? []).toString(
+                  "base64",
+                ),
+                ...(message.media.fileName
+                  ? { file_name: message.media.fileName }
+                  : {}),
+                ...(message.media.mimeType
+                  ? { mime_type: message.media.mimeType }
+                  : {}),
+              },
+            }
+          : {}),
+        ...(message.forwardFrom
+          ? {
+              forward_from: {
+                ...(message.forwardFrom.userId != null
+                  ? { user_id: message.forwardFrom.userId }
+                  : {}),
+                ...(message.forwardFrom.chatId != null
+                  ? { chat_id: message.forwardFrom.chatId }
+                  : {}),
+                ...(message.forwardFrom.messageId != null
+                  ? { message_id: message.forwardFrom.messageId }
+                  : {}),
+                ...(message.forwardFrom.senderName
+                  ? { sender_name: message.forwardFrom.senderName }
+                  : {}),
+              },
+            }
+          : {}),
+        ...(message.caption ? { caption: message.caption } : {}),
+        ...(message.replyTo != null ? { reply_to: message.replyTo } : {}),
+        ...(message.threadId != null
+          ? { message_thread_id: message.threadId }
+          : {}),
+      };
+}
+
 export async function startTestServer({
   port = 0,
   host = "127.0.0.1",
@@ -3127,14 +3180,7 @@ export async function startTestServer({
       }
       const chat = messageChat(id);
       if (method === "POST" && !subId) {
-        const text = String(body.text ?? "");
-        const entities = messageEntities(text);
-        const message = addMessage(chat, requireUser(id), {
-          text,
-          ...(entities.length > 0 ? { entities } : {}),
-        });
-        await emit("message", message);
-        return { message_id: message.message_id };
+        return post(chat, { ...body, user_id: Number(id) });
       }
     }
     if (resource === "chats" && id && sub === "albums" && method === "POST") {
@@ -3572,7 +3618,7 @@ export async function startTestServer({
         : type
           ? MEMBER_MEDIA[type].permission
           : "can_send_messages";
-    if (!canPost(chat, userId, permission)) {
+    if (chat.type !== "private" && !canPost(chat, userId, permission)) {
       throw new TelegramError(403, "CHAT_WRITE_FORBIDDEN");
     }
     const fields = {};
@@ -4424,56 +4470,7 @@ ${buttons}
     leave: (chatId, userId) =>
       act("POST", `chats/${chatId}/leave`, { user_id: userId }),
     post: async (chatId, userId, message) => {
-      const fields =
-        typeof message === "string"
-          ? { text: message }
-          : {
-              ...(message.text !== undefined ? { text: message.text } : {}),
-              ...(message.photo
-                ? {
-                    photo_base64: Buffer.from(message.photo).toString("base64"),
-                  }
-                : {}),
-              ...(message.media
-                ? {
-                    media: {
-                      type: message.media.type,
-                      base64: Buffer.from(message.media.bytes ?? []).toString(
-                        "base64",
-                      ),
-                      ...(message.media.fileName
-                        ? { file_name: message.media.fileName }
-                        : {}),
-                      ...(message.media.mimeType
-                        ? { mime_type: message.media.mimeType }
-                        : {}),
-                    },
-                  }
-                : {}),
-              ...(message.forwardFrom
-                ? {
-                    forward_from: {
-                      ...(message.forwardFrom.userId != null
-                        ? { user_id: message.forwardFrom.userId }
-                        : {}),
-                      ...(message.forwardFrom.chatId != null
-                        ? { chat_id: message.forwardFrom.chatId }
-                        : {}),
-                      ...(message.forwardFrom.messageId != null
-                        ? { message_id: message.forwardFrom.messageId }
-                        : {}),
-                      ...(message.forwardFrom.senderName
-                        ? { sender_name: message.forwardFrom.senderName }
-                        : {}),
-                    },
-                  }
-                : {}),
-              ...(message.caption ? { caption: message.caption } : {}),
-              ...(message.replyTo != null ? { reply_to: message.replyTo } : {}),
-              ...(message.threadId != null
-                ? { message_thread_id: message.threadId }
-                : {}),
-            };
+      const fields = postedMessageBody(message);
       return (
         await act("POST", `chats/${chatId}/messages`, {
           user_id: userId,
@@ -4507,8 +4504,9 @@ ${buttons}
         user_id: userId,
         data,
       }),
-    sendDirectMessage: async (userId, text) =>
-      (await act("POST", `users/${userId}/dm`, { text })).message_id,
+    sendDirectMessage: async (userId, message) =>
+      (await act("POST", `users/${userId}/dm`, postedMessageBody(message)))
+        .message_id,
     postGuestBotReply: async (chatId, callerUserId, botUsername, text) =>
       (
         await act("POST", `chats/${chatId}/guest-bot-reply`, {

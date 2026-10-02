@@ -320,4 +320,38 @@ describe("bot sends", () => {
       mime_type: "application/pdf",
     });
   });
+
+  it("takes media in a user's direct message to the bot", async () => {
+    const { server, api } = await setup();
+    const userId = await server.createUser();
+    const messageId = await server.sendDirectMessage(userId, {
+      caption: "listen",
+      media: {
+        type: "voice",
+        bytes: Buffer.from("OggS"),
+        mimeType: "audio/ogg",
+      },
+    });
+    const photoId = await server.sendDirectMessage(userId, {
+      photo: Buffer.from("png"),
+    });
+    const { result } = await api("getUpdates", { timeout: 0 });
+    const [voice, photo] = result.map((update) => update.message);
+    expect(voice).toMatchObject({
+      message_id: messageId,
+      chat: { id: userId, type: "private" },
+      voice: { mime_type: "audio/ogg", file_size: 4 },
+      caption: "listen",
+    });
+    expect(photo.message_id).toBe(photoId);
+    expect(photo.photo.length).toBeGreaterThan(0);
+    const file = await api("getFile", { file_id: voice.voice.file_id });
+    const download = await fetch(
+      `${server.origin}/file/bot${TOKEN}/${file.result.file_path}`,
+    );
+    expect(await download.text()).toBe("OggS");
+    expect(await server.sendDirectMessage(userId, "plain")).toBeGreaterThan(
+      photoId,
+    );
+  });
 });

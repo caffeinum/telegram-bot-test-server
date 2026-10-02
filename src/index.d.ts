@@ -421,8 +421,11 @@ export interface TelegramBotTestServer {
     botUsername: string,
     text: string,
   ): Promise<number>;
-  /** The user sends the bot a direct message; returns the message_id. */
-  sendDirectMessage(userId: number, text: string): Promise<number>;
+  /** The user sends the bot a direct message, with text or media; returns the message_id. */
+  sendDirectMessage(
+    userId: number,
+    message: string | Omit<PostedMessage, "threadId">,
+  ): Promise<number>;
   /** The user presses an inline button in their private chat with the bot. */
   pressDirectButton(
     userId: number,
